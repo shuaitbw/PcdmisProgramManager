@@ -1,0 +1,28 @@
+# Build outputs
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet
+packages/
+*.nupkg
+
+# Local icon previews (verification only)
+icon-preview-*.png
+
+# OS / misc
+Thumbs.db
+Desktop.ini
+*.swp
