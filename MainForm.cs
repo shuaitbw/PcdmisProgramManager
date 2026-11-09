@@ -16,6 +16,8 @@ namespace PcdmisProgramManager
             public bool IsDir;
             public DateTime Time;
             public string Note;
+            public string NoteBy;
+            public string NoteAt;
         }
 
         private readonly SettingsStore _settingsStore = new SettingsStore();
@@ -51,6 +53,7 @@ namespace PcdmisProgramManager
         private readonly Label _dName = new Label();
         private readonly Label _dPath = new Label();
         private readonly Label _dTime = new Label();
+        private readonly Label _dNoteMeta = new Label();
         private readonly TextBox _dNote = new TextBox();
         private readonly StatusStrip _status = new StatusStrip();
         private readonly ToolStripStatusLabel _lblPath = new ToolStripStatusLabel();
@@ -466,6 +469,13 @@ namespace PcdmisProgramManager
 
             var noteLbl = new Label { Text = "备注说明", Dock = DockStyle.Top, Height = 26, ForeColor = Theme.Text, Font = Theme.UiFont(9F) };
 
+            _dNoteMeta.Dock = DockStyle.Top;
+            _dNoteMeta.Height = 22;
+            _dNoteMeta.ForeColor = Theme.Muted;
+            _dNoteMeta.Font = Theme.UiFont(8.5F);
+            _dNoteMeta.AutoEllipsis = true;
+            _dNoteMeta.TextAlign = ContentAlignment.MiddleLeft;
+
             _dNote.Dock = DockStyle.Fill;
             _dNote.Multiline = true;
             _dNote.ReadOnly = true;
@@ -485,6 +495,7 @@ namespace PcdmisProgramManager
 
             _detail.Controls.Add(_dNote);
             _detail.Controls.Add(btns);
+            _detail.Controls.Add(_dNoteMeta);
             _detail.Controls.Add(noteLbl);
             _detail.Controls.Add(_dTime);
             _detail.Controls.Add(_dPath);
@@ -625,7 +636,7 @@ namespace PcdmisProgramManager
                 {
                     if (!IsPrg(f)) continue;
                     var note = _store.LoadNote(f);
-                    entries.Add(new ListEntry { Path = f, IsDir = false, Time = File.GetLastWriteTime(f), Note = note == null ? "" : note.Text });
+                    entries.Add(new ListEntry { Path = f, IsDir = false, Time = File.GetLastWriteTime(f), Note = note == null ? "" : note.Text, NoteBy = note == null ? "" : note.UpdatedBy, NoteAt = note == null ? "" : note.UpdatedAt });
                 }
             }
             catch (Exception ex) { _lblPath.Text = _currentPath + "（读取失败：" + ex.Message + "）"; }
@@ -640,7 +651,7 @@ namespace PcdmisProgramManager
                 item.SubItems.Add(en.IsDir ? "文件夹" : "测量程序");
                 item.SubItems.Add(en.Time.ToString("yyyy-MM-dd HH:mm"));
                 item.SubItems.Add(en.Note);
-                if (en.Note.Length > 0) item.ToolTipText = en.Note;
+                if (en.Note.Length > 0) item.ToolTipText = en.Note + (en.NoteBy.Length > 0 ? "\n— " + en.NoteBy + " · " + en.NoteAt : "");
                 _list.Items.Add(item);
             }
             _list.EndUpdate();
@@ -657,11 +668,13 @@ namespace PcdmisProgramManager
         private void UpdateDetail()
         {
             var en = SelectedEntry();
-            if (en == null) { _dName.Text = "未选择程序"; _dPath.Text = ""; _dTime.Text = ""; _dNote.Text = ""; return; }
+            if (en == null) { _dName.Text = "未选择程序"; _dPath.Text = ""; _dTime.Text = ""; _dNoteMeta.Text = ""; _dNote.Text = ""; return; }
             _dName.Text = Path.GetFileName(en.Path.TrimEnd('\\'));
             _dPath.Text = en.Path;
             _dTime.Text = (en.IsDir ? "文件夹 · " : "测量程序 · ") + en.Time.ToString("yyyy-MM-dd HH:mm");
             _dNote.Text = en.Note;
+            string by = en.NoteBy ?? "";
+            _dNoteMeta.Text = by.Length > 0 ? "由 " + by + " 添加 · " + (en.NoteAt ?? "") : "";
         }
 
         private void ActivateSelected()
@@ -803,10 +816,12 @@ namespace PcdmisProgramManager
         {
             var en = SelectedEntry();
             if (en == null || en.IsDir) { MessageBox.Show(this, "请先选择一个测量程序。", "提示"); return; }
-            using (var dlg = new NoteForm(Path.GetFileNameWithoutExtension(en.Path), en.Note))
+            using (var dlg = new NoteForm(Path.GetFileNameWithoutExtension(en.Path), en.Note, _settings.UserName))
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    _store.SaveNote(new NoteRecord { Path = en.Path, Text = dlg.NoteText, UpdatedBy = _settings.UserName, UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
+                    string author = dlg.Author.Length > 0 ? dlg.Author : Environment.UserName;
+                    _store.SaveNote(new NoteRecord { Path = en.Path, Text = dlg.NoteText, UpdatedBy = author, UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
+                    _settings.UserName = author; _settingsStore.Save(_settings);
                     PopulateList();
                 }
         }

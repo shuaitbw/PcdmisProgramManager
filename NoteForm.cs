@@ -7,10 +7,12 @@ namespace PcdmisProgramManager
     public class NoteForm : Form
     {
         private readonly TextBox _text = new TextBox();
+        private readonly TextBox _author = new TextBox();
 
         public string NoteText => _text.Text;
+        public string Author => _author.Text.Trim();
 
-        public NoteForm(string programName, string currentNote)
+        public NoteForm(string programName, string currentNote, string currentAuthor)
         {
             Text = "备注 - " + programName;
             Font = Theme.UiFont();
@@ -35,6 +37,14 @@ namespace PcdmisProgramManager
             _text.Text = currentNote ?? "";
             _text.AcceptsReturn = true;
 
+            var authorPanel = new Panel { Dock = DockStyle.Top, Height = 38, Padding = new Padding(0, 6, 0, 0) };
+            var lblAuthor = new Label { Text = "备注人：", Location = new Point(2, 10), AutoSize = true };
+            _author.Location = new Point(72, 6);
+            _author.Width = 220;
+            _author.Text = string.IsNullOrWhiteSpace(currentAuthor) ? Environment.UserName : currentAuthor;
+            authorPanel.Controls.Add(lblAuthor);
+            authorPanel.Controls.Add(_author);
+
             var panel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Bottom,
@@ -49,6 +59,7 @@ namespace PcdmisProgramManager
 
             Controls.Add(_text);
             Controls.Add(panel);
+            Controls.Add(authorPanel);
             Controls.Add(lbl);
 
             AcceptButton = ok;

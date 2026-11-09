@@ -38,7 +38,7 @@ namespace PcdmisProgramManager
         }
     }
 
-    // 本机配置（指向共享数据目录、PC-DMIS 路径、当前使用人）
+    // 本机配置（指向共享数据目录、PC-DMIS 路径、上次备注人）
     public class AppSettings
     {
         public string SharedDataDir { get; set; }

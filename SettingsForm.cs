@@ -8,7 +8,6 @@ namespace PcdmisProgramManager
     {
         private readonly TextBox _shared = new TextBox();
         private readonly TextBox _exe = new TextBox();
-        private readonly TextBox _user = new TextBox();
         private readonly TextBox _machine = new TextBox();
 
         public AppSettings Result { get; private set; }
@@ -65,13 +64,9 @@ namespace PcdmisProgramManager
                 ForeColor = SystemColors.GrayText
             };
 
-            var lblUser = new Label { Text = "当前使用人", Location = new Point(12, 138), AutoSize = true };
-            _user.Location = new Point(110, 134);
-            _user.Width = 200;
-
-            var lblMachine = new Label { Text = "机器名", Location = new Point(330, 138), AutoSize = true };
-            _machine.Location = new Point(384, 134);
-            _machine.Width = 126;
+            var lblMachine = new Label { Text = "机器名", Location = new Point(12, 138), AutoSize = true };
+            _machine.Location = new Point(110, 134);
+            _machine.Width = 200;
             var hintMachine = new Label
             {
                 Text = "COM 打开所用 CMM 机器名，默认 CMM1",
@@ -88,20 +83,19 @@ namespace PcdmisProgramManager
                 {
                     SharedDataDir = _shared.Text.Trim(),
                     PcdmisExePath = _exe.Text.Trim(),
-                    UserName = string.IsNullOrWhiteSpace(_user.Text) ? Environment.UserName : _user.Text.Trim(),
+                    UserName = current.UserName,
                     MachineName = string.IsNullOrWhiteSpace(_machine.Text) ? "CMM1" : _machine.Text.Trim()
                 };
             };
 
             _shared.Text = current.SharedDataDir;
             _exe.Text = current.PcdmisExePath;
-            _user.Text = current.UserName;
             _machine.Text = string.IsNullOrWhiteSpace(current.MachineName) ? "CMM1" : current.MachineName;
 
             Controls.AddRange(new Control[] {
                 lblShared, _shared, browseShared, hintShared,
                 lblExe, _exe, browseExe, hintExe,
-                lblUser, _user, lblMachine, _machine, hintMachine, ok, cancel });
+                lblMachine, _machine, hintMachine, ok, cancel });
             AcceptButton = ok;
             CancelButton = cancel;
         }
