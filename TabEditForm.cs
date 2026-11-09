@@ -9,6 +9,7 @@ namespace PcdmisProgramManager
         private readonly TextBox _name = new TextBox();
         private readonly TextBox _path = new TextBox();
         private readonly CheckBox _recursive = new CheckBox();
+        private readonly CheckBox _shared = new CheckBox();
 
         public TabItem Result { get; private set; }
 
@@ -21,7 +22,7 @@ namespace PcdmisProgramManager
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(560, 170);
+            ClientSize = new Size(560, 200);
 
             var lblName = new Label { Text = "标签名称", Location = new Point(12, 18), AutoSize = true };
             _name.Location = new Point(90, 14);
@@ -44,8 +45,13 @@ namespace PcdmisProgramManager
             _recursive.Location = new Point(90, 84);
             _recursive.AutoSize = true;
 
-            var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(374, 126), Width = 80 };
-            var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(460, 126), Width = 80 };
+            _shared.Text = "多机共享（存入共享目录，其它电脑可见；不勾选则仅本机）";
+            _shared.Location = new Point(90, 112);
+            _shared.AutoSize = true;
+            _shared.Checked = true;
+
+            var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(374, 156), Width = 80 };
+            var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(460, 156), Width = 80 };
             ok.Click += (s, e) =>
             {
                 if (string.IsNullOrWhiteSpace(_name.Text) || string.IsNullOrWhiteSpace(_path.Text))
@@ -59,7 +65,8 @@ namespace PcdmisProgramManager
                     Id = existing != null ? existing.Id : Guid.NewGuid().ToString("N"),
                     Name = _name.Text.Trim(),
                     Path = _path.Text.Trim(),
-                    Recursive = _recursive.Checked
+                    Recursive = _recursive.Checked,
+                    Shared = _shared.Checked
                 };
             };
 
@@ -68,9 +75,10 @@ namespace PcdmisProgramManager
                 _name.Text = existing.Name;
                 _path.Text = existing.Path;
                 _recursive.Checked = existing.Recursive;
+                _shared.Checked = existing.Shared;
             }
 
-            Controls.AddRange(new Control[] { lblName, _name, lblPath, _path, browse, _recursive, ok, cancel });
+            Controls.AddRange(new Control[] { lblName, _name, lblPath, _path, browse, _recursive, _shared, ok, cancel });
             AcceptButton = ok;
             CancelButton = cancel;
         }

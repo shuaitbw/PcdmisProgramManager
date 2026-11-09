@@ -21,6 +21,7 @@ namespace PcdmisProgramManager
         private readonly SettingsStore _settingsStore = new SettingsStore();
         private AppSettings _settings;
         private SharedStore _store;
+        private readonly LocalTabStore _localTabStore = new LocalTabStore();
         private List<TabItem> _tabs = new List<TabItem>();
 
         private readonly Panel _header = new Panel();
@@ -87,7 +88,7 @@ namespace PcdmisProgramManager
 
             _settings = _settingsStore.Load();
             _store = new SharedStore(_settings.SharedDataDir);
-            _tabs = _store.LoadTabs();
+            _tabs = LoadAllTabs();
             RebuildTabs(null);
             UpdateSharedLabel();
             _queue = _workflow.LoadQueue();
@@ -99,7 +100,8 @@ namespace PcdmisProgramManager
             {
                 try { _split.SplitterDistance = Math.Max(300, _main.Width - 300); }
                 catch { }
-                try { _vsplit.SplitterDistance = Math.Max(200, _main.Height - 220); }
+                int bottomHeight = Math.Max(280, (int)(_main.Height * 0.45));
+                try { _vsplit.SplitterDistance = Math.Max(200, _main.Height - bottomHeight); }
                 catch { }
                 try { _listsSplit.SplitterDistance = Math.Max(200, _listsSplit.Width / 2); }
                 catch { }
@@ -531,10 +533,25 @@ namespace PcdmisProgramManager
             }
         }
 
+        // 共享目录里的标签 = 多机共享；本机文件里的 = 仅本机
+        private List<TabItem> LoadAllTabs()
+        {
+            var list = new List<TabItem>();
+            foreach (var t in _store.LoadTabs()) { t.Shared = true; list.Add(t); }
+            foreach (var t in _localTabStore.Load()) { t.Shared = false; list.Add(t); }
+            return list;
+        }
+
+        private void SaveAllTabs()
+        {
+            _store.SaveTabs(_tabs.Where(x => x.Shared).ToList());
+            _localTabStore.Save(_tabs.Where(x => !x.Shared).ToList());
+        }
+
         private void RebuildTabs(string selectId)
         {
             _tabList.Items.Clear();
-            foreach (var t in _tabs) _tabList.Items.Add(t.Name);
+            foreach (var t in _tabs) _tabList.Items.Add(t.Name + (t.Shared ? "" : "（本机）"));
             if (_tabs.Count > 0)
             {
                 int idx = _tabs.FindIndex(x => x.Id == selectId);
@@ -799,7 +816,7 @@ namespace PcdmisProgramManager
         {
             using (var dlg = new TabEditForm(null))
                 if (dlg.ShowDialog(this) == DialogResult.OK)
-                { _tabs.Add(dlg.Result); _store.SaveTabs(_tabs); RebuildTabs(dlg.Result.Id); }
+                { _tabs.Add(dlg.Result); SaveAllTabs(); RebuildTabs(dlg.Result.Id); }
         }
 
         private void EditTab()
@@ -811,7 +828,7 @@ namespace PcdmisProgramManager
                 {
                     int i = _tabs.FindIndex(x => x.Id == t.Id);
                     if (i >= 0) _tabs[i] = dlg.Result;
-                    _store.SaveTabs(_tabs); RebuildTabs(dlg.Result.Id);
+                    SaveAllTabs(); RebuildTabs(dlg.Result.Id);
                 }
         }
 
@@ -821,7 +838,7 @@ namespace PcdmisProgramManager
             if (t == null) return;
             if (MessageBox.Show(this, "删除标签「" + t.Name + "」？（不会删除程序文件）", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _tabs.RemoveAll(x => x.Id == t.Id);
-            _store.SaveTabs(_tabs); RebuildTabs(null);
+            SaveAllTabs(); RebuildTabs(null);
         }
 
         private void OpenSettings()
@@ -831,7 +848,7 @@ namespace PcdmisProgramManager
                 {
                     _settings = dlg.Result; _settingsStore.Save(_settings);
                     _store = new SharedStore(_settings.SharedDataDir);
-                    _tabs = _store.LoadTabs(); RebuildTabs(null); UpdateSharedLabel();
+                    _tabs = LoadAllTabs(); RebuildTabs(null); UpdateSharedLabel();
                 }
         }
 

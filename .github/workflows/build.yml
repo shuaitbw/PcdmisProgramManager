@@ -1,0 +1,35 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore PcdmisProgramManager.csproj
+
+      - name: Build (Release, x86, net48)
+        run: dotnet build PcdmisProgramManager.csproj -c Release -o publish --no-restore
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcdmisProgramManager
+          path: |
+            publish/PcdmisProgramManager.exe
+            publish/PcdmisProgramManager.exe.config
+          if-no-files-found: warn

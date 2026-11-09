@@ -2,13 +2,14 @@ using System;
 
 namespace PcdmisProgramManager
 {
-    // 标签 = 一个路径快速访问书签（团队共享）
+    // 标签 = 一个路径快速访问书签（Shared=true 存共享目录，false 仅本机）
     public class TabItem
     {
         public string Id { get; set; }
         public string Name { get; set; }
         public string Path { get; set; }
         public bool Recursive { get; set; }
+        public bool Shared { get; set; }
 
         public TabItem()
         {
@@ -16,6 +17,7 @@ namespace PcdmisProgramManager
             Name = "";
             Path = "";
             Recursive = false;
+            Shared = true;
         }
     }
 

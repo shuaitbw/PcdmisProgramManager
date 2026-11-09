@@ -72,6 +72,28 @@ namespace PcdmisProgramManager
         }
     }
 
+    // 仅本机的标签（不同步到共享目录）
+    public class LocalTabStore
+    {
+        private string File => Path.Combine(Paths.LocalRoot, "tabs.local.json");
+
+        public List<TabItem> Load()
+        {
+            try
+            {
+                if (System.IO.File.Exists(File))
+                    return Json.Deserialize<List<TabItem>>(System.IO.File.ReadAllText(File)) ?? new List<TabItem>();
+            }
+            catch { }
+            return new List<TabItem>();
+        }
+
+        public void Save(List<TabItem> tabs)
+        {
+            System.IO.File.WriteAllText(File, Json.Serialize(tabs));
+        }
+    }
+
     // 本机工作流：等候队列 + 打开历史（打开发生在本机，故按机器保存）
     public class WorkflowStore
     {
