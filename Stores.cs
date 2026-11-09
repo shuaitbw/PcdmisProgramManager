@@ -72,6 +72,44 @@ namespace PcdmisProgramManager
         }
     }
 
+    // 本机工作流：等候队列 + 打开历史（打开发生在本机，故按机器保存）
+    public class WorkflowStore
+    {
+        private string QueueFile => Path.Combine(Paths.LocalRoot, "queue.json");
+        private string HistoryFile => Path.Combine(Paths.LocalRoot, "history.json");
+
+        public List<OpenItem> LoadQueue()
+        {
+            return LoadList(QueueFile);
+        }
+
+        public void SaveQueue(List<OpenItem> items)
+        {
+            System.IO.File.WriteAllText(QueueFile, Json.Serialize(items));
+        }
+
+        public List<OpenItem> LoadHistory()
+        {
+            return LoadList(HistoryFile);
+        }
+
+        public void SaveHistory(List<OpenItem> items)
+        {
+            System.IO.File.WriteAllText(HistoryFile, Json.Serialize(items));
+        }
+
+        private static List<OpenItem> LoadList(string path)
+        {
+            try
+            {
+                if (System.IO.File.Exists(path))
+                    return Json.Deserialize<List<OpenItem>>(System.IO.File.ReadAllText(path)) ?? new List<OpenItem>();
+            }
+            catch { }
+            return new List<OpenItem>();
+        }
+    }
+
     // 共享数据目录：tabs.json + notes/<key>.json。未配置共享时回退本机目录。
     public class SharedStore
     {

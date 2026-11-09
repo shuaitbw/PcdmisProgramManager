@@ -53,6 +53,19 @@ namespace PcdmisProgramManager
         }
     }
 
+    // 等候队列 / 打开历史 的条目（本机持久化）
+    public class OpenItem
+    {
+        public string Path { get; set; }
+        public string Time { get; set; }
+
+        public OpenItem()
+        {
+            Path = "";
+            Time = "";
+        }
+    }
+
     // 列表运行时行
     public class ProgramItem
     {

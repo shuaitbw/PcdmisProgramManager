@@ -35,6 +35,15 @@ namespace PcdmisProgramManager
         private readonly ToolStripButton _forward = new ToolStripButton("→");
         private readonly Panel _main = new Panel();
         private readonly SplitContainer _split = new SplitContainer();
+        private readonly SplitContainer _vsplit = new SplitContainer();
+        private readonly SplitContainer _listsSplit = new SplitContainer();
+        private readonly ListView _queueList = new ListView();
+        private readonly ListView _histList = new ListView();
+        private readonly Label _queueTitle = new Label();
+        private readonly Label _histTitle = new Label();
+        private readonly WorkflowStore _workflow = new WorkflowStore();
+        private List<OpenItem> _queue = new List<OpenItem>();
+        private List<OpenItem> _history = new List<OpenItem>();
         private readonly ListView _list = new ListView();
         private readonly ImageList _icons = new ImageList();
         private readonly Panel _detail = new Panel();
@@ -81,10 +90,18 @@ namespace PcdmisProgramManager
             _tabs = _store.LoadTabs();
             RebuildTabs(null);
             UpdateSharedLabel();
+            _queue = _workflow.LoadQueue();
+            _history = _workflow.LoadHistory();
+            RefreshQueue();
+            RefreshHistory();
 
             Shown += (s, e) =>
             {
                 try { _split.SplitterDistance = Math.Max(300, _main.Width - 300); }
+                catch { }
+                try { _vsplit.SplitterDistance = Math.Max(200, _main.Height - 220); }
+                catch { }
+                try { _listsSplit.SplitterDistance = Math.Max(200, _listsSplit.Width / 2); }
                 catch { }
             };
         }
@@ -159,6 +176,8 @@ namespace PcdmisProgramManager
 
             var open = new ToolStripButton("打开程序");
             open.Click += (s, e) => OpenSelected();
+            var queue = new ToolStripButton("加入等候");
+            queue.Click += (s, e) => AddSelectedToQueue();
             var note = new ToolStripButton("备注");
             note.Click += (s, e) => EditNote();
             var refresh = new ToolStripButton("刷新");
@@ -167,7 +186,7 @@ namespace PcdmisProgramManager
             settings.Click += (s, e) => OpenSettings();
 
             _toolbar.Items.AddRange(new ToolStripItem[] {
-                open, note, refresh, new ToolStripSeparator(), settings });
+                open, queue, note, refresh, new ToolStripSeparator(), settings });
         }
 
         private void BuildSidebar()
@@ -287,8 +306,115 @@ namespace PcdmisProgramManager
             _split.Panel1.Controls.Add(_list);
             _split.Panel2.Controls.Add(_detail);
 
-            _main.Controls.Add(_split);
+            BuildBottom();
+            _main.Controls.Add(_vsplit);
             _main.Controls.Add(_nav);
+        }
+
+        private void BuildBottom()
+        {
+            _vsplit.Dock = DockStyle.Fill;
+            _vsplit.Orientation = Orientation.Horizontal;
+            _vsplit.BackColor = Theme.Border;
+            _vsplit.SplitterWidth = 5;
+            _vsplit.FixedPanel = FixedPanel.Panel2;
+            _vsplit.Panel1.Controls.Add(_split);
+
+            _listsSplit.Dock = DockStyle.Fill;
+            _listsSplit.Orientation = Orientation.Vertical;
+            _listsSplit.BackColor = Theme.Border;
+            _listsSplit.SplitterWidth = 5;
+            _vsplit.Panel2.Controls.Add(_listsSplit);
+
+            _listsSplit.Panel1.Controls.Add(BuildQueueGroup());
+            _listsSplit.Panel2.Controls.Add(BuildHistoryGroup());
+        }
+
+        private Panel BuildQueueGroup()
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Panel, Padding = new Padding(8) };
+            _queueTitle.Dock = DockStyle.Top;
+            _queueTitle.Height = 28;
+            _queueTitle.Font = Theme.UiFont(9.5F);
+            _queueTitle.ForeColor = Theme.Text;
+            _queueTitle.Text = "等候打开 (0)";
+            _queueTitle.TextAlign = ContentAlignment.MiddleLeft;
+
+            _queueList.Dock = DockStyle.Fill;
+            _queueList.BorderStyle = BorderStyle.None;
+            _queueList.BackColor = Theme.Panel;
+            _queueList.ForeColor = Theme.Text;
+            _queueList.View = View.Details;
+            _queueList.FullRowSelect = true;
+            _queueList.HideSelection = false;
+            _queueList.MultiSelect = false;
+            _queueList.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            _queueList.Columns.Add("程序", 160);
+            _queueList.Columns.Add("路径", 260);
+            _queueList.Columns.Add("加入时间", 120);
+            _queueList.ItemActivate += (s, e) => OpenQueueSelected();
+
+            var btns = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36 };
+            var open = ListButton("打开", Theme.SelectBlue, Color.White);
+            open.Click += (s, e) => OpenQueueSelected();
+            var remove = ListButton("移除", Theme.Panel, Theme.Text);
+            remove.Click += (s, e) => RemoveQueueSelected();
+            var clear = ListButton("清空", Theme.Panel, Theme.Text);
+            clear.Click += (s, e) => ClearQueue();
+            btns.Controls.Add(open);
+            btns.Controls.Add(remove);
+            btns.Controls.Add(clear);
+
+            p.Controls.Add(_queueList);
+            p.Controls.Add(btns);
+            p.Controls.Add(_queueTitle);
+            return p;
+        }
+
+        private Panel BuildHistoryGroup()
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Panel, Padding = new Padding(8) };
+            _histTitle.Dock = DockStyle.Top;
+            _histTitle.Height = 28;
+            _histTitle.Font = Theme.UiFont(9.5F);
+            _histTitle.ForeColor = Theme.Text;
+            _histTitle.Text = "打开历史 (0)";
+            _histTitle.TextAlign = ContentAlignment.MiddleLeft;
+
+            _histList.Dock = DockStyle.Fill;
+            _histList.BorderStyle = BorderStyle.None;
+            _histList.BackColor = Theme.Panel;
+            _histList.ForeColor = Theme.Text;
+            _histList.View = View.Details;
+            _histList.FullRowSelect = true;
+            _histList.HideSelection = false;
+            _histList.MultiSelect = false;
+            _histList.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            _histList.Columns.Add("程序", 160);
+            _histList.Columns.Add("打开时间", 120);
+            _histList.Columns.Add("路径", 260);
+            _histList.ItemActivate += (s, e) => OpenHistorySelected();
+
+            var btns = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 36 };
+            var open = ListButton("打开", Theme.SelectBlue, Color.White);
+            open.Click += (s, e) => OpenHistorySelected();
+            var clear = ListButton("清空", Theme.Panel, Theme.Text);
+            clear.Click += (s, e) => ClearHistory();
+            btns.Controls.Add(open);
+            btns.Controls.Add(clear);
+
+            p.Controls.Add(_histList);
+            p.Controls.Add(btns);
+            p.Controls.Add(_histTitle);
+            return p;
+        }
+
+        private Button ListButton(string text, Color back, Color fore)
+        {
+            var b = new Button { Text = text, Width = 64, Height = 28, FlatStyle = FlatStyle.Flat, BackColor = back, ForeColor = fore, Font = Theme.UiFont(8.5F) };
+            b.FlatAppearance.BorderColor = Theme.Border;
+            b.FlatAppearance.BorderSize = back == Theme.SelectBlue ? 0 : 1;
+            return b;
         }
 
         private void BuildList()
@@ -369,6 +495,8 @@ namespace PcdmisProgramManager
             menu.Font = Theme.UiFont();
             var open = new ToolStripMenuItem("打开程序");
             open.Click += (s, e) => OpenSelected();
+            var queue = new ToolStripMenuItem("加入等候列表");
+            queue.Click += (s, e) => AddSelectedToQueue();
             var note = new ToolStripMenuItem("备注");
             note.Click += (s, e) => EditNote();
             var folder = new ToolStripMenuItem("打开所在文件夹");
@@ -379,7 +507,7 @@ namespace PcdmisProgramManager
             };
             var copy = new ToolStripMenuItem("复制路径");
             copy.Click += (s, e) => { var en = SelectedEntry(); if (en != null) Clipboard.SetText(en.Path); };
-            menu.Items.AddRange(new ToolStripItem[] { open, note, new ToolStripSeparator(), folder, copy });
+            menu.Items.AddRange(new ToolStripItem[] { open, queue, note, new ToolStripSeparator(), folder, copy });
             return menu;
         }
 
@@ -536,8 +664,122 @@ namespace PcdmisProgramManager
 
         private void OpenEntry(ListEntry en)
         {
-            try { PcdmisLauncher.Open(en.Path, _settings); }
-            catch (Exception ex) { MessageBox.Show(this, "打开失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            OpenProgram(en.Path, false);
+        }
+
+        // 统一打开入口：成功后记历史；若来自等候队列则移除该条目
+        private void OpenProgram(string path, bool fromQueue)
+        {
+            try { PcdmisLauncher.Open(path, _settings); }
+            catch (Exception ex) { MessageBox.Show(this, "打开失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+
+            _history.Insert(0, new OpenItem { Path = path, Time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
+            if (_history.Count > 300) _history.RemoveRange(300, _history.Count - 300);
+            _workflow.SaveHistory(_history);
+            RefreshHistory();
+
+            if (fromQueue)
+            {
+                _queue.RemoveAll(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase));
+                _workflow.SaveQueue(_queue);
+                RefreshQueue();
+            }
+        }
+
+        // ---- 等候队列 / 打开历史 ----
+        private void AddSelectedToQueue()
+        {
+            var en = SelectedEntry();
+            if (en == null || en.IsDir) { MessageBox.Show(this, "请先选择一个测量程序。", "提示"); return; }
+            if (_queue.Any(x => string.Equals(x.Path, en.Path, StringComparison.OrdinalIgnoreCase)))
+            { _lblPath.Text = "已在等候列表：" + Path.GetFileName(en.Path); return; }
+            _queue.Add(new OpenItem { Path = en.Path, Time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
+            _workflow.SaveQueue(_queue);
+            RefreshQueue();
+            _lblPath.Text = "已加入等候：" + Path.GetFileName(en.Path);
+        }
+
+        private string SelectedQueuePath()
+        {
+            return _queueList.SelectedItems.Count == 0 ? null : _queueList.SelectedItems[0].Tag as string;
+        }
+
+        private string SelectedHistoryPath()
+        {
+            return _histList.SelectedItems.Count == 0 ? null : _histList.SelectedItems[0].Tag as string;
+        }
+
+        private void OpenQueueSelected()
+        {
+            string p = SelectedQueuePath();
+            if (p == null) { MessageBox.Show(this, "请先在等候列表选择一个程序。", "提示"); return; }
+            OpenProgram(p, true);
+        }
+
+        private void RemoveQueueSelected()
+        {
+            string p = SelectedQueuePath();
+            if (p == null) return;
+            _queue.RemoveAll(x => string.Equals(x.Path, p, StringComparison.OrdinalIgnoreCase));
+            _workflow.SaveQueue(_queue);
+            RefreshQueue();
+        }
+
+        private void ClearQueue()
+        {
+            if (_queue.Count == 0) return;
+            if (MessageBox.Show(this, "清空等候列表？", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            _queue.Clear();
+            _workflow.SaveQueue(_queue);
+            RefreshQueue();
+        }
+
+        private void OpenHistorySelected()
+        {
+            string p = SelectedHistoryPath();
+            if (p == null) { MessageBox.Show(this, "请先在历史列表选择一个程序。", "提示"); return; }
+            OpenProgram(p, false);
+        }
+
+        private void ClearHistory()
+        {
+            if (_history.Count == 0) return;
+            if (MessageBox.Show(this, "清空打开历史？", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            _history.Clear();
+            _workflow.SaveHistory(_history);
+            RefreshHistory();
+        }
+
+        private void RefreshQueue()
+        {
+            _queueList.BeginUpdate();
+            _queueList.Items.Clear();
+            foreach (var q in _queue)
+            {
+                var item = new ListViewItem(Path.GetFileName(q.Path)) { Tag = q.Path };
+                item.SubItems.Add(q.Path);
+                item.SubItems.Add(q.Time);
+                item.ToolTipText = q.Path;
+                _queueList.Items.Add(item);
+            }
+            _queueList.EndUpdate();
+            _queueTitle.Text = "等候打开 (" + _queue.Count + ")";
+        }
+
+        private void RefreshHistory()
+        {
+            _histList.BeginUpdate();
+            _histList.Items.Clear();
+            foreach (var h in _history)
+            {
+                var item = new ListViewItem(Path.GetFileName(h.Path)) { Tag = h.Path };
+                item.SubItems.Add(h.Time);
+                item.SubItems.Add(h.Path);
+                item.ToolTipText = h.Path;
+                _histList.Items.Add(item);
+            }
+            _histList.EndUpdate();
+            _histTitle.Text = "打开历史 (" + _history.Count + ")";
         }
 
         private void EditNote()
