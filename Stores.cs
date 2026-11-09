@@ -182,6 +182,26 @@ namespace PcdmisProgramManager
             Write(NoteFile(note.Path), Json.Serialize(note));
         }
 
+        // 一次性读取整个备注目录，键为路径归一化哈希；避免逐文件探测共享目录（SMB 往返昂贵）
+        public Dictionary<string, NoteRecord> LoadNoteIndex()
+        {
+            var dict = new Dictionary<string, NoteRecord>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (string file in Directory.GetFiles(NotesDir, "*.json"))
+                {
+                    try
+                    {
+                        var n = Json.Deserialize<NoteRecord>(Read(file));
+                        if (n != null) dict[Path.GetFileNameWithoutExtension(file)] = n;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return dict;
+        }
+
         private string NoteFile(string programPath)
         {
             return Path.Combine(NotesDir, Paths.NormalizeKey(programPath) + ".json");

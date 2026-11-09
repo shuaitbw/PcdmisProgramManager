@@ -63,6 +63,9 @@ namespace PcdmisProgramManager
         private string _currentPath = "";
         private readonly List<string> _backStack = new List<string>();
         private readonly List<string> _forwardStack = new List<string>();
+        private bool _sortByTime;
+        private List<ListEntry> _entriesCache;
+        private string _entriesCachePath;
 
         public MainForm()
         {
@@ -186,7 +189,7 @@ namespace PcdmisProgramManager
             var note = new ToolStripButton("备注");
             note.Click += (s, e) => EditNote();
             var refresh = new ToolStripButton("刷新");
-            refresh.Click += (s, e) => PopulateList();
+            refresh.Click += (s, e) => PopulateList(true);
             var settings = new ToolStripButton("设置");
             settings.Click += (s, e) => OpenSettings();
 
@@ -433,11 +436,18 @@ namespace PcdmisProgramManager
             _list.HideSelection = false;
             _list.MultiSelect = false;
             _list.SmallImageList = _icons;
-            _list.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            _list.HeaderStyle = ColumnHeaderStyle.Clickable;
             _list.Columns.Add("名称", 280);
             _list.Columns.Add("类型", 90);
             _list.Columns.Add("修改时间", 150);
             _list.Columns.Add("备注", 300);
+            _list.ColumnClick += (s, e) =>
+            {
+                if (e.Column == 2) { if (!AtRoot()) return; _sortByTime = !_sortByTime; }
+                else if (e.Column == 0) _sortByTime = false;
+                else return;
+                PopulateList();
+            };
             _list.ItemActivate += (s, e) => ActivateSelected();
             _list.SelectedIndexChanged += (s, e) => UpdateDetail();
             _list.ContextMenuStrip = BuildMenu();
@@ -586,7 +596,8 @@ namespace PcdmisProgramManager
             { _backStack.Add(_currentPath); _forwardStack.Clear(); }
             _currentPath = path;
             _address.Text = path;
-            PopulateList();
+            _sortByTime = false;
+            PopulateList(true);
             UpdateNavButtons();
         }
 
@@ -622,30 +633,36 @@ namespace PcdmisProgramManager
         // ---- 列表 ----
         private void PopulateList()
         {
+            PopulateList(false);
+        }
+
+        // reload=true 重新枚举目录与备注（导航/刷新/改备注后）；false 复用缓存（搜索/排序，避免重复读盘）
+        private void PopulateList(bool reload)
+        {
             _list.BeginUpdate();
             _list.Items.Clear();
-            if (_currentPath.Length == 0 || !Directory.Exists(_currentPath)) { _list.EndUpdate(); _lblCount.Text = "0 项"; return; }
+            if (_currentPath.Length == 0 || !Directory.Exists(_currentPath))
+            { _list.EndUpdate(); _lblCount.Text = "0 项"; _entriesCache = null; _entriesCachePath = null; return; }
 
-            var entries = new List<ListEntry>();
-            try
+            if (reload || _entriesCache == null || !string.Equals(_entriesCachePath, _currentPath, StringComparison.OrdinalIgnoreCase))
             {
-                foreach (string d in Directory.GetDirectories(_currentPath))
-                    entries.Add(new ListEntry { Path = d, IsDir = true, Time = Directory.GetLastWriteTime(d), Note = "" });
-                var opt = (CurrentTab != null && CurrentTab.Recursive) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                foreach (string f in Directory.GetFiles(_currentPath, "*", opt))
-                {
-                    if (!IsPrg(f)) continue;
-                    var note = _store.LoadNote(f);
-                    entries.Add(new ListEntry { Path = f, IsDir = false, Time = File.GetLastWriteTime(f), Note = note == null ? "" : note.Text, NoteBy = note == null ? "" : note.UpdatedBy, NoteAt = note == null ? "" : note.UpdatedAt });
-                }
+                _entriesCache = LoadEntries(_currentPath);
+                _entriesCachePath = _currentPath;
             }
-            catch (Exception ex) { _lblPath.Text = _currentPath + "（读取失败：" + ex.Message + "）"; }
 
             string filter = _search.Text.Trim().ToLowerInvariant();
+            IEnumerable<ListEntry> entries = _entriesCache;
             if (filter.Length > 0)
-                entries = entries.Where(x => Path.GetFileName(x.Path).ToLowerInvariant().Contains(filter) || x.Note.ToLowerInvariant().Contains(filter)).ToList();
+                entries = entries.Where(x => Path.GetFileName(x.Path).ToLowerInvariant().Contains(filter) || x.Note.ToLowerInvariant().Contains(filter));
 
-            foreach (var en in entries.OrderBy(x => !x.IsDir).ThenBy(x => Path.GetFileName(x.Path), StringComparer.OrdinalIgnoreCase))
+            bool timeSort = AtRoot() && _sortByTime;
+            _list.Columns[2].Text = timeSort ? "修改时间 ▼" : "修改时间";
+            IEnumerable<ListEntry> ordered = timeSort
+                ? entries.OrderByDescending(x => x.Time)
+                : entries.OrderBy(x => !x.IsDir).ThenBy(x => Path.GetFileName(x.Path), StringComparer.OrdinalIgnoreCase);
+
+            int count = 0;
+            foreach (var en in ordered)
             {
                 var item = new ListViewItem(Path.GetFileName(en.Path.TrimEnd('\\'))) { ImageKey = en.IsDir ? "folder" : "prg", Tag = en };
                 item.SubItems.Add(en.IsDir ? "文件夹" : "测量程序");
@@ -653,11 +670,40 @@ namespace PcdmisProgramManager
                 item.SubItems.Add(en.Note);
                 if (en.Note.Length > 0) item.ToolTipText = en.Note + (en.NoteBy.Length > 0 ? "\n— " + en.NoteBy + " · " + en.NoteAt : "");
                 _list.Items.Add(item);
+                count++;
             }
             _list.EndUpdate();
             _lblPath.Text = _currentPath;
-            _lblCount.Text = entries.Count + " 项";
+            _lblCount.Text = count + " 项";
             UpdateDetail();
+        }
+
+        private List<ListEntry> LoadEntries(string path)
+        {
+            var entries = new List<ListEntry>();
+            try
+            {
+                foreach (string d in Directory.GetDirectories(path))
+                    entries.Add(new ListEntry { Path = d, IsDir = true, Time = Directory.GetLastWriteTime(d), Note = "", NoteBy = "", NoteAt = "" });
+                var opt = (CurrentTab != null && CurrentTab.Recursive) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                var noteIndex = _store.LoadNoteIndex();
+                foreach (string f in Directory.GetFiles(path, "*", opt))
+                {
+                    if (!IsPrg(f)) continue;
+                    NoteRecord note;
+                    noteIndex.TryGetValue(Paths.NormalizeKey(f), out note);
+                    entries.Add(new ListEntry { Path = f, IsDir = false, Time = File.GetLastWriteTime(f), Note = note == null ? "" : note.Text, NoteBy = note == null ? "" : (note.UpdatedBy ?? ""), NoteAt = note == null ? "" : (note.UpdatedAt ?? "") });
+                }
+            }
+            catch (Exception ex) { _lblPath.Text = path + "（读取失败：" + ex.Message + "）"; }
+            return entries;
+        }
+
+        // 当前是否停留在标签绑定的根目录（时间排序仅此处生效）
+        private bool AtRoot()
+        {
+            var t = CurrentTab;
+            return t != null && string.Equals(_currentPath.TrimEnd('\\'), t.Path.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
         }
 
         private ListEntry SelectedEntry()
@@ -822,7 +868,7 @@ namespace PcdmisProgramManager
                     string author = dlg.Author.Length > 0 ? dlg.Author : Environment.UserName;
                     _store.SaveNote(new NoteRecord { Path = en.Path, Text = dlg.NoteText, UpdatedBy = author, UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
                     _settings.UserName = author; _settingsStore.Save(_settings);
-                    PopulateList();
+                    PopulateList(true);
                 }
         }
 
