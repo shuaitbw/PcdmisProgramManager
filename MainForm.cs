@@ -66,6 +66,7 @@ namespace PcdmisProgramManager
         private bool _sortByTime;
         private List<ListEntry> _entriesCache;
         private string _entriesCachePath;
+        private bool _suppressSearchEvent;
 
         public MainForm()
         {
@@ -162,7 +163,7 @@ namespace PcdmisProgramManager
             _search.Height = 26;
             _search.Font = Theme.UiFont(9.5F);
             _search.BorderStyle = BorderStyle.FixedSingle;
-            _search.TextChanged += (s, e) => PopulateList();
+            _search.TextChanged += (s, e) => { if (!_suppressSearchEvent) PopulateList(); };
 
             _header.Controls.Add(title);
             _header.Controls.Add(sub);
@@ -597,6 +598,9 @@ namespace PcdmisProgramManager
             _currentPath = path;
             _address.Text = path;
             _sortByTime = false;
+            _suppressSearchEvent = true;
+            _search.Text = "";
+            _suppressSearchEvent = false;
             PopulateList(true);
             UpdateNavButtons();
         }
