@@ -25,7 +25,7 @@ namespace PcdmisProgramManager
 
             var lbl = new Label
             {
-                Text = "为程序「" + programName + "」填写备注说明（共享给所有电脑）：",
+                Text = "为「" + programName + "」填写备注说明（共享给所有电脑）：",
                 Dock = DockStyle.Top,
                 Height = 28,
                 TextAlign = ContentAlignment.MiddleLeft

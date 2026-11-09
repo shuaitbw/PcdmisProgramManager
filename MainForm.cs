@@ -683,10 +683,14 @@ namespace PcdmisProgramManager
             var entries = new List<ListEntry>();
             try
             {
-                foreach (string d in Directory.GetDirectories(path))
-                    entries.Add(new ListEntry { Path = d, IsDir = true, Time = Directory.GetLastWriteTime(d), Note = "", NoteBy = "", NoteAt = "" });
-                var opt = (CurrentTab != null && CurrentTab.Recursive) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
                 var noteIndex = _store.LoadNoteIndex();
+                foreach (string d in Directory.GetDirectories(path))
+                {
+                    NoteRecord dn;
+                    noteIndex.TryGetValue(Paths.NormalizeKey(d), out dn);
+                    entries.Add(new ListEntry { Path = d, IsDir = true, Time = Directory.GetLastWriteTime(d), Note = dn == null ? "" : dn.Text, NoteBy = dn == null ? "" : (dn.UpdatedBy ?? ""), NoteAt = dn == null ? "" : (dn.UpdatedAt ?? "") });
+                }
+                var opt = (CurrentTab != null && CurrentTab.Recursive) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
                 foreach (string f in Directory.GetFiles(path, "*", opt))
                 {
                     if (!IsPrg(f)) continue;
@@ -861,8 +865,9 @@ namespace PcdmisProgramManager
         private void EditNote()
         {
             var en = SelectedEntry();
-            if (en == null || en.IsDir) { MessageBox.Show(this, "请先选择一个测量程序。", "提示"); return; }
-            using (var dlg = new NoteForm(Path.GetFileNameWithoutExtension(en.Path), en.Note, _settings.UserName))
+            if (en == null) { MessageBox.Show(this, "请先选择一个文件或文件夹。", "提示"); return; }
+            string name = en.IsDir ? Path.GetFileName(en.Path.TrimEnd('\\')) : Path.GetFileNameWithoutExtension(en.Path);
+            using (var dlg = new NoteForm(name, en.Note, _settings.UserName))
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     string author = dlg.Author.Length > 0 ? dlg.Author : Environment.UserName;
