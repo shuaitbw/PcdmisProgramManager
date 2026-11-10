@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace PcdmisProgramManager
@@ -67,6 +69,10 @@ namespace PcdmisProgramManager
         private List<ListEntry> _entriesCache;
         private string _entriesCachePath;
         private bool _suppressSearchEvent;
+        private int _loadGen;
+        private CancellationTokenSource _loadCts;
+        private string _loadingPath;
+        private int _renderGen;
 
         public MainForm()
         {
@@ -94,6 +100,8 @@ namespace PcdmisProgramManager
             Controls.Add(_header);
 
             _settings = _settingsStore.Load();
+            ExcelLookup.MasterXlsPath = _settings.MasterXlsPath;
+            ExcelLookup.CncRootPath = _settings.CncRootPath;
             _store = new SharedStore(_settings.SharedDataDir);
             _tabs = LoadAllTabs();
             RebuildTabs(null);
@@ -645,17 +653,80 @@ namespace PcdmisProgramManager
         // reload=true 重新枚举目录与备注（导航/刷新/改备注后）；false 复用缓存（搜索/排序，避免重复读盘）
         private void PopulateList(bool reload)
         {
-            _list.BeginUpdate();
-            _list.Items.Clear();
             if (_currentPath.Length == 0 || !Directory.Exists(_currentPath))
-            { _list.EndUpdate(); _lblCount.Text = "0 项"; _entriesCache = null; _entriesCachePath = null; return; }
+            {
+                CancelLoad();
+                _renderGen++;
+                _list.BeginUpdate();
+                _list.Items.Clear();
+                _list.EndUpdate();
+                _lblCount.Text = "0 项";
+                _entriesCache = null; _entriesCachePath = null; _loadingPath = null;
+                return;
+            }
 
             if (reload || _entriesCache == null || !string.Equals(_entriesCachePath, _currentPath, StringComparison.OrdinalIgnoreCase))
             {
-                _entriesCache = LoadEntries(_currentPath);
-                _entriesCachePath = _currentPath;
+                // 同路径已有在途加载：搜索/排序不重复发起，完成时会按当前过滤与排序渲染
+                if (!reload && string.Equals(_loadingPath, _currentPath, StringComparison.OrdinalIgnoreCase)) return;
+                StartLoad(_currentPath);
+                return;
             }
+            RenderList();
+        }
 
+        private void CancelLoad()
+        {
+            if (_loadCts != null) { try { _loadCts.Cancel(); } catch { } }
+        }
+
+        // 网络枚举放后台线程，UI 只负责发起与接收；_loadGen 丢弃过期结果，避免快速导航竞态
+        private void StartLoad(string path)
+        {
+            CancelLoad();
+            _loadGen++;
+            int gen = _loadGen;
+            var cts = new CancellationTokenSource();
+            _loadCts = cts;
+            _loadingPath = path;
+            _lblPath.Text = path;
+            _lblCount.Text = "加载中…";
+            bool recursive = CurrentTab != null && CurrentTab.Recursive;
+            CancellationToken token = cts.Token;
+            Task.Run(() => LoadEntries(path, recursive, token))
+                .ContinueWith(t => OnEntriesLoaded(t, gen, path, cts), TaskScheduler.FromCurrentSynchronizationContext());
+        }
+
+        private void OnEntriesLoaded(Task<LoadOutcome> t, int gen, string path, CancellationTokenSource cts)
+        {
+            cts.Dispose();
+            if (IsDisposed || gen != _loadGen || !string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase)) return;
+            _loadingPath = null;
+            if (ReferenceEquals(_loadCts, cts)) _loadCts = null;
+            if (t.IsFaulted)
+            {
+                _lblPath.Text = path + "（读取失败：" + t.Exception.InnerException.Message + "）";
+                _lblCount.Text = "0 项";
+                return;
+            }
+            LoadOutcome o = t.Result;
+            if (o == null) return;
+            _lblPath.Text = o.Error == null ? path : path + "（读取失败：" + o.Error + "）";
+            _entriesCache = o.Entries;
+            _entriesCachePath = path;
+            RenderList();
+        }
+
+        private class LoadOutcome
+        {
+            public List<ListEntry> Entries;
+            public string Error;
+        }
+
+        private void RenderList()
+        {
+            _renderGen++;
+            int gen = _renderGen;
             string filter = _search.Text.Trim().ToLowerInvariant();
             IEnumerable<ListEntry> entries = _entriesCache;
             if (filter.Length > 0)
@@ -663,50 +734,68 @@ namespace PcdmisProgramManager
 
             bool timeSort = AtRoot() && _sortByTime;
             _list.Columns[2].Text = timeSort ? "修改时间 ▼" : "修改时间";
-            IEnumerable<ListEntry> ordered = timeSort
+            List<ListEntry> ordered = (timeSort
                 ? entries.OrderByDescending(x => x.Time)
-                : entries.OrderBy(x => !x.IsDir).ThenBy(x => Path.GetFileName(x.Path), StringComparer.OrdinalIgnoreCase);
+                : entries.OrderBy(x => !x.IsDir).ThenBy(x => Path.GetFileName(x.Path), StringComparer.OrdinalIgnoreCase)).ToList();
 
-            int count = 0;
-            foreach (var en in ordered)
+            _lblCount.Text = ordered.Count + " 项";
+            _list.BeginUpdate();
+            _list.Items.Clear();
+            // 分批填充：大目录（递归标签）也不长时间占住 UI 线程；_renderGen 作废旧批次
+            Action<int> addBatch = null;
+            addBatch = start =>
             {
-                var item = new ListViewItem(Path.GetFileName(en.Path.TrimEnd('\\'))) { ImageKey = en.IsDir ? "folder" : "prg", Tag = en };
-                item.SubItems.Add(en.IsDir ? "文件夹" : "测量程序");
-                item.SubItems.Add(en.Time.ToString("yyyy-MM-dd HH:mm"));
-                item.SubItems.Add(en.Note);
-                if (en.Note.Length > 0) item.ToolTipText = en.Note + (en.NoteBy.Length > 0 ? "\n— " + en.NoteBy + " · " + en.NoteAt : "");
-                _list.Items.Add(item);
-                count++;
-            }
-            _list.EndUpdate();
-            _lblPath.Text = _currentPath;
-            _lblCount.Text = count + " 项";
-            UpdateDetail();
+                while (true)
+                {
+                    if (IsDisposed || gen != _renderGen) return;
+                    int end = Math.Min(start + 400, ordered.Count);
+                    for (int i = start; i < end; i++)
+                    {
+                        ListEntry en = ordered[i];
+                        var item = new ListViewItem(Path.GetFileName(en.Path.TrimEnd('\\'))) { ImageKey = en.IsDir ? "folder" : "prg", Tag = en };
+                        item.SubItems.Add(en.IsDir ? "文件夹" : "测量程序");
+                        item.SubItems.Add(en.Time.ToString("yyyy-MM-dd HH:mm"));
+                        item.SubItems.Add(en.Note);
+                        if (en.Note.Length > 0) item.ToolTipText = en.Note + (en.NoteBy.Length > 0 ? "\n— " + en.NoteBy + " · " + en.NoteAt : "");
+                        _list.Items.Add(item);
+                    }
+                    if (end == ordered.Count) { _list.EndUpdate(); UpdateDetail(); return; }
+                    // 句柄未创建（Show 前加载已完成）时 BeginInvoke 会抛异常，同步补完剩余批次
+                    if (IsHandleCreated) { BeginInvoke(addBatch, new object[] { end }); return; }
+                    start = end;
+                }
+            };
+            if (ordered.Count == 0) { _list.EndUpdate(); UpdateDetail(); }
+            else addBatch(0);
         }
 
-        private List<ListEntry> LoadEntries(string path)
+        // Enumerate* 的时间戳来自同一次目录枚举，避免逐条目 GetLastWriteTime 的额外 SMB 往返
+        private LoadOutcome LoadEntries(string path, bool recursive, CancellationToken token)
         {
             var entries = new List<ListEntry>();
             try
             {
                 var noteIndex = _store.LoadNoteIndex();
-                foreach (string d in Directory.GetDirectories(path))
+                var di = new DirectoryInfo(path);
+                foreach (DirectoryInfo d in di.EnumerateDirectories())
                 {
+                    if (token.IsCancellationRequested) return null;
                     NoteRecord dn;
-                    noteIndex.TryGetValue(Paths.NormalizeKey(d), out dn);
-                    entries.Add(new ListEntry { Path = d, IsDir = true, Time = Directory.GetLastWriteTime(d), Note = dn == null ? "" : dn.Text, NoteBy = dn == null ? "" : (dn.UpdatedBy ?? ""), NoteAt = dn == null ? "" : (dn.UpdatedAt ?? "") });
+                    noteIndex.TryGetValue(Paths.NormalizeKey(d.FullName), out dn);
+                    entries.Add(new ListEntry { Path = d.FullName, IsDir = true, Time = d.LastWriteTime, Note = dn == null ? "" : dn.Text, NoteBy = dn == null ? "" : (dn.UpdatedBy ?? ""), NoteAt = dn == null ? "" : (dn.UpdatedAt ?? "") });
                 }
-                var opt = (CurrentTab != null && CurrentTab.Recursive) ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                foreach (string f in Directory.GetFiles(path, "*", opt))
+                var opt = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                foreach (FileInfo f in di.EnumerateFiles("*", opt))
                 {
-                    if (!IsPrg(f)) continue;
+                    if (token.IsCancellationRequested) return null;
+                    if (!IsPrg(f.FullName)) continue;
                     NoteRecord note;
-                    noteIndex.TryGetValue(Paths.NormalizeKey(f), out note);
-                    entries.Add(new ListEntry { Path = f, IsDir = false, Time = File.GetLastWriteTime(f), Note = note == null ? "" : note.Text, NoteBy = note == null ? "" : (note.UpdatedBy ?? ""), NoteAt = note == null ? "" : (note.UpdatedAt ?? "") });
+                    noteIndex.TryGetValue(Paths.NormalizeKey(f.FullName), out note);
+                    entries.Add(new ListEntry { Path = f.FullName, IsDir = false, Time = f.LastWriteTime, Note = note == null ? "" : note.Text, NoteBy = note == null ? "" : (note.UpdatedBy ?? ""), NoteAt = note == null ? "" : (note.UpdatedAt ?? "") });
                 }
             }
-            catch (Exception ex) { _lblPath.Text = path + "（读取失败：" + ex.Message + "）"; }
-            return entries;
+            catch (Exception ex) { return new LoadOutcome { Entries = entries, Error = ex.Message }; }
+            return new LoadOutcome { Entries = entries, Error = null };
         }
 
         // 当前是否停留在标签绑定的根目录（时间排序仅此处生效）
@@ -919,6 +1008,8 @@ namespace PcdmisProgramManager
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     _settings = dlg.Result; _settingsStore.Save(_settings);
+                    ExcelLookup.MasterXlsPath = _settings.MasterXlsPath;
+                    ExcelLookup.CncRootPath = _settings.CncRootPath;
                     _store = new SharedStore(_settings.SharedDataDir);
                     _tabs = LoadAllTabs(); RebuildTabs(null); UpdateSharedLabel();
                 }

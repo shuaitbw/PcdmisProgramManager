@@ -97,6 +97,7 @@ namespace PcdmisProgramManager
             string box = _box.Text.Trim();
             if (tool.Length == 0) { _status.Text = "请先填写或查询出模号。"; return; }
             if (box.Length == 0) { _status.Text = "请填写第几盒。"; return; }
+            if (string.IsNullOrWhiteSpace(ExcelLookup.CncRootPath)) { _status.Text = "请先在「设置」中配置电极根目录。"; return; }
             string path = ExcelLookup.BuildElePath(tool, box);
             if (path == null) { _status.Text = "模号格式不足以生成路径（至少 5 位）。"; return; }
             if (!Directory.Exists(path)) { _status.Text = "文件夹不存在：" + path; return; }

@@ -43,6 +43,8 @@ namespace PcdmisProgramManager
     {
         public string SharedDataDir { get; set; }
         public string PcdmisExePath { get; set; }
+        public string MasterXlsPath { get; set; }
+        public string CncRootPath { get; set; }
         public string UserName { get; set; }
         public string MachineName { get; set; }
 
@@ -50,6 +52,8 @@ namespace PcdmisProgramManager
         {
             SharedDataDir = "";
             PcdmisExePath = "";
+            MasterXlsPath = "";
+            CncRootPath = "";
             UserName = Environment.UserName;
             MachineName = "CMM1";
         }

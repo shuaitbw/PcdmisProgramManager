@@ -1,0 +1,13 @@
+Vendored binaries in this directory (no NuGet restore required):
+
+NPOI 2.5.6 (NPOI.dll, NPOI.OOXML.dll, NPOI.OpenXml4Net.dll, NPOI.OpenXmlFormats.dll)
+  Apache License 2.0 - see LICENSE-NPOI.txt
+  https://github.com/nissl-lab/npoi
+
+SharpZipLib 1.3.3 (ICSharpCode.SharpZipLib.dll)
+  MIT - https://licenses.nuget.org/MIT
+  https://github.com/icsharpcode/SharpZipLib
+
+Portable.BouncyCastle 1.8.9 (BouncyCastle.Crypto.dll)
+  MIT-style adaptation - https://www.bouncycastle.org/csharp/licence.html
+  https://github.com/bcgit/bc-csharp
