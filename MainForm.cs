@@ -189,13 +189,15 @@ namespace PcdmisProgramManager
             queue.Click += (s, e) => AddSelectedToQueue();
             var note = new ToolStripButton("备注");
             note.Click += (s, e) => EditNote();
+            var tool = new ToolStripButton("模号/电极");
+            tool.Click += (s, e) => { using (var dlg = new ToolQueryForm(p => _search.Text = p)) dlg.ShowDialog(this); };
             var refresh = new ToolStripButton("刷新");
             refresh.Click += (s, e) => PopulateList(true);
             var settings = new ToolStripButton("设置");
             settings.Click += (s, e) => OpenSettings();
 
             _toolbar.Items.AddRange(new ToolStripItem[] {
-                open, queue, note, refresh, new ToolStripSeparator(), settings });
+                open, queue, note, tool, refresh, new ToolStripSeparator(), settings });
         }
 
         private void BuildSidebar()
