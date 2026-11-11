@@ -450,7 +450,7 @@ namespace PcdmisProgramManager
             _list.View = View.Details;
             _list.FullRowSelect = true;
             _list.HideSelection = false;
-            _list.MultiSelect = false;
+            _list.MultiSelect = true;
             _list.SmallImageList = _icons;
             _list.HeaderStyle = ColumnHeaderStyle.Clickable;
             _list.OwnerDraw = true;
@@ -470,6 +470,22 @@ namespace PcdmisProgramManager
             _list.ItemActivate += (s, e) => ActivateSelected();
             _list.SelectedIndexChanged += (s, e) => UpdateDetail();
             _list.ContextMenuStrip = BuildMenu();
+            // 右键落在已选中的多选项上时保留多选，否则原生控件会先把选择收缩为右键行
+            List<int> rightKeep = null;
+            _list.MouseDown += (s, e) =>
+            {
+                rightKeep = null;
+                if (e.Button != MouseButtons.Right || _list.SelectedItems.Count < 2) return;
+                var hit = _list.GetItemAt(e.X, e.Y);
+                if (hit == null || !hit.Selected) return;
+                rightKeep = _list.SelectedIndices.Cast<int>().ToList();
+            };
+            _list.MouseUp += (s, e) =>
+            {
+                if (rightKeep == null || e.Button != MouseButtons.Right) return;
+                foreach (int i in rightKeep) if (i < _list.Items.Count) _list.Items[i].Selected = true;
+                rightKeep = null;
+            };
         }
 
         private void ListDrawSubItem(object sender, DrawListViewSubItemEventArgs e)
@@ -580,6 +596,13 @@ namespace PcdmisProgramManager
             var copy = new ToolStripMenuItem("复制路径");
             copy.Click += (s, e) => { var en = SelectedEntry(); if (en != null) Clipboard.SetText(en.Path); };
             menu.Items.AddRange(new ToolStripItem[] { open, queue, note, new ToolStripSeparator(), folder, copy });
+            menu.Opening += (s, e) =>
+            {
+                var en = SelectedEntry();
+                open.Enabled = en != null && !en.IsDir;
+                note.Enabled = folder.Enabled = copy.Enabled = en != null;
+                queue.Enabled = _list.SelectedItems.Cast<ListViewItem>().Any(x => !((ListEntry)x.Tag).IsDir);
+            };
             return menu;
         }
 
@@ -777,8 +800,6 @@ namespace PcdmisProgramManager
                 : entries.OrderBy(x => !x.IsDir).ThenBy(x => Path.GetFileName(x.Path), StringComparer.OrdinalIgnoreCase)).ToList();
 
             _lblCount.Text = ordered.Count + " 项";
-            _list.BeginUpdate();
-            _list.Items.Clear();
             // 分批填充：大目录（递归标签）也不长时间占住 UI 线程；_renderGen 作废旧批次
             Action<int> addBatch = null;
             addBatch = start =>
@@ -787,24 +808,30 @@ namespace PcdmisProgramManager
                 {
                     if (IsDisposed || gen != _renderGen) return;
                     int end = Math.Min(start + 400, ordered.Count);
-                    for (int i = start; i < end; i++)
+                    // 重绘暂停不能跨越异步批次，否则过期批次退出会使列表永久停止重绘。
+                    _list.BeginUpdate();
+                    try
                     {
-                        ListEntry en = ordered[i];
-                        var item = new ListViewItem(Path.GetFileName(en.Path.TrimEnd('\\'))) { ImageKey = en.IsDir ? "folder" : "prg", Tag = en };
-                        item.SubItems.Add(en.IsDir ? "文件夹" : "测量程序");
-                        item.SubItems.Add(en.Time.ToString("yyyy-MM-dd HH:mm"));
-                        item.SubItems.Add(en.Note);
-                        if (en.Note.Length > 0) item.ToolTipText = en.Note + (en.NoteBy.Length > 0 ? "\n— " + en.NoteBy + " · " + en.NoteAt : "");
-                        _list.Items.Add(item);
+                        if (start == 0) _list.Items.Clear();
+                        for (int i = start; i < end; i++)
+                        {
+                            ListEntry en = ordered[i];
+                            var item = new ListViewItem(Path.GetFileName(en.Path.TrimEnd('\\'))) { ImageKey = en.IsDir ? "folder" : "prg", Tag = en };
+                            item.SubItems.Add(en.IsDir ? "文件夹" : "测量程序");
+                            item.SubItems.Add(en.Time.ToString("yyyy-MM-dd HH:mm"));
+                            item.SubItems.Add(en.Note);
+                            if (en.Note.Length > 0) item.ToolTipText = en.Note + (en.NoteBy.Length > 0 ? "\n— " + en.NoteBy + " · " + en.NoteAt : "");
+                            _list.Items.Add(item);
+                        }
                     }
-                    if (end == ordered.Count) { _list.EndUpdate(); UpdateDetail(); return; }
+                    finally { _list.EndUpdate(); }
+                    if (end == ordered.Count) { UpdateDetail(); return; }
                     // 句柄未创建（Show 前加载已完成）时 BeginInvoke 会抛异常，同步补完剩余批次
                     if (IsHandleCreated) { BeginInvoke(addBatch, new object[] { end }); return; }
                     start = end;
                 }
             };
-            if (ordered.Count == 0) { _list.EndUpdate(); UpdateDetail(); }
-            else addBatch(0);
+            addBatch(0);
         }
 
         // Enumerate* 的时间戳来自同一次目录枚举，避免逐条目 GetLastWriteTime 的额外 SMB 往返
@@ -845,13 +872,20 @@ namespace PcdmisProgramManager
 
         private ListEntry SelectedEntry()
         {
-            return _list.SelectedItems.Count == 0 ? null : _list.SelectedItems[0].Tag as ListEntry;
+            return _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as ListEntry : null;
         }
 
         private void UpdateDetail()
         {
             var en = SelectedEntry();
-            if (en == null) { _dName.Text = "未选择程序"; _dPath.Text = ""; _dTime.Text = ""; _dNoteMeta.Text = ""; _dNote.Text = ""; return; }
+            if (en == null)
+            {
+                bool multiple = _list.SelectedItems.Count > 1;
+                _dName.Text = multiple ? "已选择 " + _list.SelectedItems.Count + " 项" : "未选择程序";
+                _dPath.Text = multiple ? "右键加入等候列表（仅加入测量程序）" : "";
+                _dTime.Text = ""; _dNoteMeta.Text = ""; _dNote.Text = "";
+                return;
+            }
             _dName.Text = Path.GetFileName(en.Path.TrimEnd('\\'));
             _dPath.Text = en.Path;
             _dTime.Text = (en.IsDir ? "文件夹 · " : "测量程序 · ") + en.Time.ToString("yyyy-MM-dd HH:mm");
@@ -902,14 +936,23 @@ namespace PcdmisProgramManager
         // ---- 等候队列 / 打开历史 ----
         private void AddSelectedToQueue()
         {
-            var en = SelectedEntry();
-            if (en == null || en.IsDir) { MessageBox.Show(this, "请先选择一个测量程序。", "提示"); return; }
-            if (_queue.Any(x => string.Equals(x.Path, en.Path, StringComparison.OrdinalIgnoreCase)))
-            { _lblPath.Text = "已在等候列表：" + Path.GetFileName(en.Path); return; }
-            _queue.Add(new OpenItem { Path = en.Path, Time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") });
-            _workflow.SaveQueue(_queue);
-            RefreshQueue();
-            _lblPath.Text = "已加入等候：" + Path.GetFileName(en.Path);
+            var entries = _list.SelectedItems.Cast<ListViewItem>().Select(x => (ListEntry)x.Tag).Where(x => !x.IsDir).ToList();
+            if (entries.Count == 0) { MessageBox.Show(this, "请先选择一个或多个测量程序。", "提示"); return; }
+            var queuedPaths = new HashSet<string>(_queue.Select(x => x.Path), StringComparer.OrdinalIgnoreCase);
+            string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            int added = 0;
+            foreach (var en in entries)
+            {
+                if (!queuedPaths.Add(en.Path)) continue;
+                _queue.Add(new OpenItem { Path = en.Path, Time = time });
+                added++;
+            }
+            if (added > 0)
+            {
+                _workflow.SaveQueue(_queue);
+                RefreshQueue();
+            }
+            _lblPath.Text = "已加入等候：" + added + " 个程序" + (added < entries.Count ? "（跳过 " + (entries.Count - added) + " 个重复项）" : "");
         }
 
         private string SelectedQueuePath()
