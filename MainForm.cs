@@ -123,6 +123,16 @@ namespace PcdmisProgramManager
             };
         }
 
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.F5)
+            {
+                PopulateList(true);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
         private static bool IsPrg(string path)
         {
             return string.Equals(Path.GetExtension(path), ".prg", StringComparison.OrdinalIgnoreCase);
@@ -151,15 +161,6 @@ namespace PcdmisProgramManager
                 AutoSize = true,
                 Location = new Point(16, 12)
             };
-            var sub = new Label
-            {
-                Text = "多机共享 · 标签快速访问",
-                ForeColor = Theme.SidebarText,
-                Font = Theme.UiFont(8.5F),
-                AutoSize = true,
-                Location = new Point(200, 18)
-            };
-
             var searchLbl = new Label
             {
                 Text = "搜索",
@@ -174,7 +175,6 @@ namespace PcdmisProgramManager
             _search.TextChanged += (s, e) => { if (!_suppressSearchEvent) PopulateList(); };
 
             _header.Controls.Add(title);
-            _header.Controls.Add(sub);
             _header.Controls.Add(searchLbl);
             _header.Controls.Add(_search);
             _header.Resize += (s, e) =>
@@ -191,21 +191,13 @@ namespace PcdmisProgramManager
             Theme.StyleToolStrip(_toolbar);
             _toolbar.Dock = DockStyle.Top;
 
-            var open = new ToolStripButton("打开程序");
-            open.Click += (s, e) => OpenSelected();
-            var queue = new ToolStripButton("加入等候");
-            queue.Click += (s, e) => AddSelectedToQueue();
-            var note = new ToolStripButton("备注");
-            note.Click += (s, e) => EditNote();
-            var tool = new ToolStripButton("模号/电极");
+            var tool = new ToolStripButton("模号速查");
             tool.Click += (s, e) => { using (var dlg = new ToolQueryForm(p => _search.Text = p)) dlg.ShowDialog(this); };
-            var refresh = new ToolStripButton("刷新");
-            refresh.Click += (s, e) => PopulateList(true);
             var settings = new ToolStripButton("设置");
             settings.Click += (s, e) => OpenSettings();
 
             _toolbar.Items.AddRange(new ToolStripItem[] {
-                open, queue, note, tool, refresh, new ToolStripSeparator(), settings });
+                tool, new ToolStripSeparator(), settings });
         }
 
         private void BuildSidebar()
@@ -237,6 +229,17 @@ namespace PcdmisProgramManager
             {
                 var t = CurrentTab;
                 if (t != null) { _backStack.Clear(); _forwardStack.Clear(); Navigate(t.Path, false); }
+                // 自绘 ListBox 切换选中时不会重画旧选中行，整表失效以清除残留的选中底色
+                _tabList.Invalidate();
+            };
+            _tabList.ContextMenuStrip = BuildTabMenu();
+            _tabList.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Right)
+                {
+                    int i = _tabList.IndexFromPoint(e.Location);
+                    if (i >= 0) _tabList.SelectedIndex = i;
+                }
             };
 
             var buttons = new FlowLayoutPanel
@@ -295,15 +298,17 @@ namespace PcdmisProgramManager
             _back.Click += (s, e) => GoBack();
             _up.Click += (s, e) => GoUp();
             _forward.Click += (s, e) => GoForward();
+            var refresh = new ToolStripButton("刷新") { ToolTipText = "刷新 (F5)" };
+            refresh.Click += (s, e) => PopulateList(true);
             _address.AutoSize = false;
             _address.KeyDown += (s, e) =>
             {
                 if (e.KeyCode == Keys.Enter) { Navigate(_address.Text.Trim(), true); e.SuppressKeyPress = true; }
             };
-            _nav.Items.AddRange(new ToolStripItem[] { _back, _up, _forward, new ToolStripSeparator(), _address });
+            _nav.Items.AddRange(new ToolStripItem[] { _back, _up, _forward, new ToolStripSeparator(), refresh, _address });
             _nav.Resize += (s, e) =>
             {
-                int used = _back.Width + _up.Width + _forward.Width + 40;
+                int used = _back.Width + _up.Width + _forward.Width + refresh.Width + 40;
                 _address.Width = Math.Max(300, _nav.Width - used);
             };
         }
@@ -448,6 +453,9 @@ namespace PcdmisProgramManager
             _list.MultiSelect = false;
             _list.SmallImageList = _icons;
             _list.HeaderStyle = ColumnHeaderStyle.Clickable;
+            _list.OwnerDraw = true;
+            _list.DrawColumnHeader += (s, e) => e.DrawDefault = true;
+            _list.DrawSubItem += ListDrawSubItem;
             _list.Columns.Add("名称", 280);
             _list.Columns.Add("类型", 90);
             _list.Columns.Add("修改时间", 150);
@@ -462,6 +470,34 @@ namespace PcdmisProgramManager
             _list.ItemActivate += (s, e) => ActivateSelected();
             _list.SelectedIndexChanged += (s, e) => UpdateDetail();
             _list.ContextMenuStrip = BuildMenu();
+        }
+
+        private void ListDrawSubItem(object sender, DrawListViewSubItemEventArgs e)
+        {
+            if (e.ColumnIndex != 3 || string.IsNullOrWhiteSpace(e.SubItem.Text))
+            {
+                e.DrawDefault = true;
+                return;
+            }
+
+            bool selected = e.Item.Selected;
+            Color background = selected ? (_list.Focused ? SystemColors.Highlight : SystemColors.Control) : _list.BackColor;
+            Color foreground = selected && _list.Focused ? SystemColors.HighlightText : _list.ForeColor;
+            using (var brush = new SolidBrush(background)) e.Graphics.FillRectangle(brush, e.Bounds);
+
+            int x = e.Bounds.X + 4;
+            int y = e.Bounds.Y + (e.Bounds.Height - 12) / 2;
+            using (var brush = new SolidBrush(Color.FromArgb(224, 163, 27)))
+                e.Graphics.FillRectangle(brush, x, y, 9, 12);
+            using (var pen = new Pen(Color.White))
+            {
+                e.Graphics.DrawLine(pen, x + 2, y + 4, x + 6, y + 4);
+                e.Graphics.DrawLine(pen, x + 2, y + 7, x + 6, y + 7);
+            }
+
+            var textRect = new Rectangle(e.Bounds.X + 19, e.Bounds.Y, Math.Max(0, e.Bounds.Width - 24), e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, e.SubItem.Text, _list.Font, textRect, foreground,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
         private void BuildDetail()
@@ -479,16 +515,16 @@ namespace PcdmisProgramManager
 
             _dPath.Dock = DockStyle.Top;
             _dPath.Height = 44;
-            _dPath.ForeColor = Theme.Muted;
+            _dPath.ForeColor = Color.FromArgb(135, 143, 153);
             _dPath.Font = Theme.UiFont(8.5F);
             _dPath.AutoEllipsis = true;
 
             _dTime.Dock = DockStyle.Top;
             _dTime.Height = 24;
-            _dTime.ForeColor = Theme.Muted;
+            _dTime.ForeColor = Color.FromArgb(135, 143, 153);
             _dTime.Font = Theme.UiFont(8.5F);
 
-            var noteLbl = new Label { Text = "备注说明", Dock = DockStyle.Top, Height = 26, ForeColor = Theme.Text, Font = Theme.UiFont(9F) };
+            var noteLbl = new Label { Text = "备注说明", Dock = DockStyle.Top, Height = 26, ForeColor = Theme.Text, Font = new Font(Font, FontStyle.Bold) };
 
             _dNoteMeta.Dock = DockStyle.Top;
             _dNoteMeta.Height = 22;
@@ -501,7 +537,9 @@ namespace PcdmisProgramManager
             _dNote.Multiline = true;
             _dNote.ReadOnly = true;
             _dNote.BorderStyle = BorderStyle.None;
-            _dNote.BackColor = Theme.Bg;
+            _dNote.BackColor = Color.FromArgb(255, 247, 214);
+            _dNote.ForeColor = Theme.Text;
+            _dNote.Font = Theme.UiFont(11.5F);
             _dNote.ScrollBars = ScrollBars.Vertical;
 
             var btns = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft };
@@ -973,6 +1011,20 @@ namespace PcdmisProgramManager
         }
 
         // ---- 标签管理 / 设置 ----
+        private ContextMenuStrip BuildTabMenu()
+        {
+            var menu = new ContextMenuStrip();
+            menu.Font = Theme.UiFont();
+            var add = new ToolStripMenuItem("新增标签");
+            add.Click += (s, e) => AddTab();
+            var edit = new ToolStripMenuItem("编辑标签");
+            edit.Click += (s, e) => EditTab();
+            var del = new ToolStripMenuItem("删除标签");
+            del.Click += (s, e) => RemoveTab();
+            menu.Items.AddRange(new ToolStripItem[] { add, edit, new ToolStripSeparator(), del });
+            return menu;
+        }
+
         private void AddTab()
         {
             using (var dlg = new TabEditForm(null))
